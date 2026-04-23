@@ -48,3 +48,5 @@ Thumbs.db
 # Archivos temporales del proyecto
 tmp/
 *.log
+
+lib/
