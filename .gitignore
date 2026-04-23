@@ -1,0 +1,50 @@
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Git LFS descargas locales
+git-lfs-3.7.1/
+git-lfs.tar.gz
+
+# Librerías locales (si son dependencias instaladas manualmente)
+lib/
+
+# Cachés de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archivos temporales del proyecto
+tmp/
+*.log
