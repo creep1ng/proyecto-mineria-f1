@@ -30,7 +30,7 @@ st.title("🏎️ F1 Race Finish Predictor - CRISP-DM Deployment")
 st.markdown(
     "Esta aplicación carga el pipeline de ML entrenado y predice la probabilidad "
     "de que un piloto **termine** la carrera (`finished = 1`) a partir de datos "
-    "pre-carrera."
+    "pre-carrera ya procesados ( mismas columnas que `train_balanced.csv` )."
 )
 
 # ---------------------------------------------------------------------------
@@ -85,23 +85,16 @@ with st.sidebar.expander("Parrilla y carrera", expanded=True):
         1,
         "Posición de salida en la parrilla (1 = pole).",
     )
-    laps = num_input("laps (vueltas programadas)", 57, 1, 100, 1)
     year = num_input("year", 2024, 1950, 2030, 1)
-    round_num = num_input("round (número de carrera)", 1, 1, 25, 1)
-    race_month = num_input("race_month (mes)", 3, 1, 12, 1)
-    race_day_of_year = num_input("race_day_of_year (día del año)", 65, 1, 366, 1)
-    season_progress = st.sidebar.slider(
-        "season_progress (progreso de temporada)",
-        0.0,
-        1.0,
-        0.15,
-        0.01,
-        help="Fracción de la temporada completada (0 = inicio, 1 = final).",
+    has_qualifying = st.sidebar.selectbox(
+        "has_qualifying",
+        [0, 1],
+        index=1,
+        help="1 si hay datos de clasificación, 0 si no.",
     )
 
 # --- Datos del piloto ---
 with st.sidebar.expander("Piloto", expanded=True):
-    driver_age = num_input("driver_age (edad)", 26, 16, 60, 1)
     driver_race_count = num_input("driver_race_count (carreras previas)", 50, 0, 400, 1)
     driver_prev_finish_rate = st.sidebar.slider(
         "driver_prev_finish_rate",
@@ -135,9 +128,6 @@ with st.sidebar.expander("Constructor (equipo)", expanded=True):
     constructor_last5_finish_rate = st.sidebar.slider(
         "constructor_last5_finish_rate", 0.0, 1.0, 0.75, 0.01
     )
-    constructor_nationality_encoded = num_input(
-        "constructor_nationality_encoded", 3, 0, 50, 1
-    )
 
 # --- Datos del circuito ---
 with st.sidebar.expander("Circuito", expanded=True):
@@ -157,30 +147,9 @@ with st.sidebar.expander("Circuito", expanded=True):
 
 # --- Clasificación (qualifying) ---
 with st.sidebar.expander("Clasificación", expanded=True):
-    has_qualifying = st.sidebar.selectbox(
-        "has_qualifying",
-        [0, 1],
-        index=1,
-        help="1 si hay datos de clasificación, 0 si no.",
-    )
-    front_row_start = st.sidebar.selectbox(
-        "front_row_start (primera fila)", [0, 1], index=0
-    )
-    top10_start = st.sidebar.selectbox("top10_start (top 10 salida)", [0, 1], index=1)
     q1_seconds = num_input("q1_seconds (tiempo Q1 en segundos)", 88.5, 50.0, 120.0, 0.1)
     q2_seconds = num_input("q2_seconds (tiempo Q2 en segundos)", 87.9, 50.0, 120.0, 0.1)
     q3_seconds = num_input("q3_seconds (tiempo Q3 en segundos)", 87.4, 50.0, 120.0, 0.1)
-    best_q_time = num_input(
-        "best_q_time (mejor tiempo de clasificación)", 87.4, 50.0, 120.0, 0.1
-    )
-    grid_normalized = st.sidebar.slider(
-        "grid_normalized",
-        0.0,
-        1.0,
-        0.05,
-        0.01,
-        help="Posición de parrilla normalizada entre 0 y 1 (0 = pole, 1 = último).",
-    )
 
 # ---------------------------------------------------------------------------
 # Botón de predicción
@@ -192,12 +161,15 @@ if st.sidebar.button("🔮 Predecir", type="primary"):
             f"Error reportado: {model_error}"
         )
     else:
+        # Variables derivadas (ingeniería de características)
+        experience_ratio = driver_race_count / (constructor_race_count + 1)
+        grid_above_avg = 1 if grid > constructor_prev_avg_grid else 0
+        avg_finish_rate = (driver_prev_finish_rate + constructor_prev_finish_rate) / 2
+
         input_df = pd.DataFrame(
             [
                 {
                     "grid": grid,
-                    "laps": laps,
-                    "driver_age": driver_age,
                     "driver_race_count": driver_race_count,
                     "driver_prev_finish_rate": driver_prev_finish_rate,
                     "driver_last5_finish_rate": driver_last5_finish_rate,
@@ -207,23 +179,17 @@ if st.sidebar.button("🔮 Predecir", type="primary"):
                     "constructor_last5_finish_rate": constructor_last5_finish_rate,
                     "circuit_finish_rate": circuit_finish_rate,
                     "circuit_avg_grid": circuit_avg_grid,
-                    "race_month": race_month,
-                    "race_day_of_year": race_day_of_year,
-                    "season_progress": season_progress,
                     "q1_seconds": q1_seconds,
                     "q2_seconds": q2_seconds,
                     "q3_seconds": q3_seconds,
-                    "best_q_time": best_q_time,
-                    "grid_normalized": grid_normalized,
                     "has_qualifying": has_qualifying,
-                    "front_row_start": front_row_start,
-                    "top10_start": top10_start,
                     "year": year,
-                    "round": round_num,
                     "driver_nationality_encoded": driver_nationality_encoded,
-                    "constructor_nationality_encoded": constructor_nationality_encoded,
                     "circuit_country_encoded": circuit_country_encoded,
                     "circuitRef_encoded": circuitRef_encoded,
+                    "experience_ratio": experience_ratio,
+                    "grid_above_avg": grid_above_avg,
+                    "avg_finish_rate": avg_finish_rate,
                 }
             ]
         )
