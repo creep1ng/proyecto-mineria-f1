@@ -68,6 +68,7 @@ st.markdown(
 MODEL_PATH = os.path.join(
     APP_DIR, "..", "models", "best_model_pipe.pkl"
 )
+TRAIN_REFERENCE_PATH = os.path.join(APP_DIR, "..", "output", "train_original.csv")
 
 pipe = None
 model_loaded = False
@@ -85,6 +86,23 @@ try:
 except Exception as e:
     model_error = str(e)
     st.error(f"❌ Error al cargar el modelo:\n\n{model_error}")
+
+
+@st.cache_data
+def load_training_reference(path):
+    """Load observed training values used to constrain categorical inputs."""
+
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
+training_reference = load_training_reference(TRAIN_REFERENCE_PATH)
+if training_reference.empty:
+    st.warning(
+        "No se encontró la referencia de entrenamiento. La app usará valores por defecto, "
+        "pero los desplegables no podrán limitarse al dominio entrenado."
+    )
 
 # ---------------------------------------------------------------------------
 # Inputs del usuario
@@ -106,6 +124,54 @@ def num_input(label, value, min_value=None, max_value=None, step=None, help_text
     return st.sidebar.number_input(label, value=value, **kwargs)
 
 
+def observed_values(column, fallback):
+    if column not in training_reference.columns:
+        return fallback
+    values = training_reference[column].dropna().unique().tolist()
+    return sorted(int(value) for value in values) or fallback
+
+
+def option_index(options, default):
+    return options.index(default) if default in options else 0
+
+
+def encoded_select(label, column, default, help_text=""):
+    options = observed_values(column, [default])
+    return st.sidebar.selectbox(
+        label,
+        options,
+        index=option_index(options, default),
+        format_func=lambda value: f"{value} (observado en entrenamiento)",
+        help=help_text,
+        key=column,
+    )
+
+
+def build_profile_options(columns, sort_columns, ascending=False, limit=500):
+    if training_reference.empty or any(
+        col not in training_reference.columns for col in columns
+    ):
+        return pd.DataFrame(columns=columns)
+
+    profiles = training_reference.loc[:, columns].drop_duplicates()
+    profiles = (
+        profiles.sort_values(sort_columns, ascending=ascending)
+        .head(limit)
+        .reset_index(drop=True)
+    )
+    return profiles
+
+
+def profile_label(prefix, row, fields):
+    parts = [
+        f"{label}: {row[column]:.2f}"
+        if isinstance(row[column], float)
+        else f"{label}: {row[column]}"
+        for label, column in fields
+    ]
+    return f"{prefix} {row.name + 1} · " + " · ".join(parts)
+
+
 # --- Datos de parrilla y carrera ---
 with st.sidebar.expander("Parrilla y carrera", expanded=True):
     grid = num_input(
@@ -118,26 +184,59 @@ with st.sidebar.expander("Parrilla y carrera", expanded=True):
         key="grid",
     )
     year = num_input("year", 2024, 1950, 2030, 1, key="year")
-    has_qualifying = st.sidebar.selectbox(
-        "has_qualifying",
-        [0, 1],
-        index=1,
-        help="1 si hay datos de clasificación, 0 si no.",
-        key="has_qualifying",
-    )
     round_num = num_input("round (ronda de la temporada)", 10, 1, 25, 1, key="round")
     top10_start = 1 if grid <= 10 else 0
 
 # --- Datos del piloto ---
+driver_profiles = build_profile_options(
+    [
+        "driver_race_count",
+        "driver_prev_finish_rate",
+        "driver_last5_finish_rate",
+        "driver_nationality_encoded",
+    ],
+    ["driver_race_count", "driver_prev_finish_rate"],
+)
 with st.sidebar.expander("Piloto", expanded=True):
+    if not driver_profiles.empty:
+        driver_profile_index = st.sidebar.selectbox(
+            "Piloto entrenado",
+            range(len(driver_profiles)),
+            format_func=lambda idx: profile_label(
+                "Piloto",
+                driver_profiles.iloc[idx],
+                [
+                    ("carreras", "driver_race_count"),
+                    ("finish", "driver_prev_finish_rate"),
+                    ("nac", "driver_nationality_encoded"),
+                ],
+            ),
+            key="driver_profile",
+        )
+        selected_driver = driver_profiles.iloc[driver_profile_index]
+        driver_race_default = int(selected_driver["driver_race_count"])
+        driver_prev_finish_default = float(selected_driver["driver_prev_finish_rate"])
+        driver_last5_finish_default = float(selected_driver["driver_last5_finish_rate"])
+        driver_nationality_default = int(selected_driver["driver_nationality_encoded"])
+    else:
+        driver_race_default = 50
+        driver_prev_finish_default = 0.75
+        driver_last5_finish_default = 0.80
+        driver_nationality_default = 5
+
     driver_race_count = num_input(
-        "driver_race_count (carreras previas)", 50, 0, 400, 1, key="driver_race_count"
+        "driver_race_count (carreras previas)",
+        driver_race_default,
+        0,
+        400,
+        1,
+        key="driver_race_count",
     )
     driver_prev_finish_rate = st.sidebar.slider(
         "driver_prev_finish_rate",
         0.0,
         1.0,
-        0.75,
+        driver_prev_finish_default,
         0.01,
         help="Tasa histórica de finalización del piloto.",
         key="driver_prev_finish_rate",
@@ -146,72 +245,238 @@ with st.sidebar.expander("Piloto", expanded=True):
         "driver_last5_finish_rate",
         0.0,
         1.0,
-        0.80,
+        driver_last5_finish_default,
         0.01,
         help="Tasa de finalización en las últimas 5 carreras.",
         key="driver_last5_finish_rate",
     )
-    driver_nationality_encoded = num_input(
-        "driver_nationality_encoded", 5, 0, 50, 1, key="driver_nationality_encoded"
+    driver_nationality_encoded = encoded_select(
+        "Nacionalidad del piloto",
+        "driver_nationality_encoded",
+        driver_nationality_default,
+        "Lista limitada a las nacionalidades codificadas presentes en entrenamiento.",
     )
 
 # --- Datos del constructor ---
+constructor_profiles = build_profile_options(
+    [
+        "constructor_race_count",
+        "constructor_prev_finish_rate",
+        "constructor_prev_avg_grid",
+        "constructor_last5_finish_rate",
+        "constructor_nationality_encoded",
+    ],
+    ["constructor_race_count", "constructor_prev_finish_rate"],
+)
 with st.sidebar.expander("Constructor (equipo)", expanded=True):
+    if not constructor_profiles.empty:
+        constructor_profile_index = st.sidebar.selectbox(
+            "Constructor entrenado",
+            range(len(constructor_profiles)),
+            format_func=lambda idx: profile_label(
+                "Constructor",
+                constructor_profiles.iloc[idx],
+                [
+                    ("carreras", "constructor_race_count"),
+                    ("finish", "constructor_prev_finish_rate"),
+                    ("nac", "constructor_nationality_encoded"),
+                ],
+            ),
+            key="constructor_profile",
+        )
+        selected_constructor = constructor_profiles.iloc[constructor_profile_index]
+        constructor_race_default = int(selected_constructor["constructor_race_count"])
+        constructor_prev_finish_default = float(
+            selected_constructor["constructor_prev_finish_rate"]
+        )
+        constructor_prev_avg_grid_default = float(
+            selected_constructor["constructor_prev_avg_grid"]
+        )
+        constructor_last5_finish_default = float(
+            selected_constructor["constructor_last5_finish_rate"]
+        )
+        constructor_nationality_default = int(
+            selected_constructor["constructor_nationality_encoded"]
+        )
+    else:
+        constructor_race_default = 200
+        constructor_prev_finish_default = 0.70
+        constructor_prev_avg_grid_default = 8.0
+        constructor_last5_finish_default = 0.75
+        constructor_nationality_default = 5
+
     constructor_race_count = num_input(
-        "constructor_race_count (carreras previas)", 200, 0, 1000, 1, key="constructor_race_count"
+        "constructor_race_count (carreras previas)",
+        constructor_race_default,
+        0,
+        max(2500, constructor_race_default),
+        1,
+        key="constructor_race_count",
     )
     constructor_prev_finish_rate = st.sidebar.slider(
-        "constructor_prev_finish_rate", 0.0, 1.0, 0.70, 0.01, key="constructor_prev_finish_rate"
+        "constructor_prev_finish_rate",
+        0.0,
+        1.0,
+        constructor_prev_finish_default,
+        0.01,
+        key="constructor_prev_finish_rate",
     )
     constructor_prev_avg_grid = num_input(
         "constructor_prev_avg_grid (parrilla promedio histórica)",
-        8.0,
-        1.0,
-        30.0,
+        constructor_prev_avg_grid_default,
+        0.0,
+        40.0,
         0.5,
         key="constructor_prev_avg_grid",
     )
     constructor_last5_finish_rate = st.sidebar.slider(
-        "constructor_last5_finish_rate", 0.0, 1.0, 0.75, 0.01, key="constructor_last5_finish_rate"
+        "constructor_last5_finish_rate",
+        0.0,
+        1.0,
+        constructor_last5_finish_default,
+        0.01,
+        key="constructor_last5_finish_rate",
     )
-    constructor_nationality_encoded = num_input(
-        "constructor_nationality_encoded", 5, 0, 50, 1, key="constructor_nationality_encoded"
+    constructor_nationality_encoded = encoded_select(
+        "Nacionalidad del constructor",
+        "constructor_nationality_encoded",
+        constructor_nationality_default,
+        "Lista limitada a las nacionalidades de constructor presentes en entrenamiento.",
     )
 
 # --- Datos del circuito ---
+circuit_profiles = build_profile_options(
+    [
+        "circuit_finish_rate",
+        "circuit_avg_grid",
+        "circuit_country_encoded",
+        "circuitRef_encoded",
+    ],
+    ["circuit_finish_rate", "circuit_avg_grid"],
+)
 with st.sidebar.expander("Circuito", expanded=True):
+    if not circuit_profiles.empty:
+        circuit_profile_index = st.sidebar.selectbox(
+            "Circuito entrenado",
+            range(len(circuit_profiles)),
+            format_func=lambda idx: profile_label(
+                "Circuito",
+                circuit_profiles.iloc[idx],
+                [
+                    ("finish", "circuit_finish_rate"),
+                    ("pais", "circuit_country_encoded"),
+                    ("ref", "circuitRef_encoded"),
+                ],
+            ),
+            key="circuit_profile",
+        )
+        selected_circuit = circuit_profiles.iloc[circuit_profile_index]
+        circuit_finish_default = float(selected_circuit["circuit_finish_rate"])
+        circuit_avg_grid_default = float(selected_circuit["circuit_avg_grid"])
+        circuit_country_default = int(selected_circuit["circuit_country_encoded"])
+        circuit_ref_default = int(selected_circuit["circuitRef_encoded"])
+    else:
+        circuit_finish_default = 0.80
+        circuit_avg_grid_default = 10.0
+        circuit_country_default = 10
+        circuit_ref_default = 8
+
     circuit_finish_rate = st.sidebar.slider(
         "circuit_finish_rate",
         0.0,
         1.0,
-        0.80,
+        circuit_finish_default,
         0.01,
         help="Tasa histórica de finalización en este circuito.",
         key="circuit_finish_rate",
     )
     circuit_avg_grid = num_input(
         "circuit_avg_grid (parrilla promedio histórica)",
-        10.0,
+        circuit_avg_grid_default,
         1.0,
         30.0,
         0.5,
         key="circuit_avg_grid",
     )
-    circuit_country_encoded = num_input(
-        "circuit_country_encoded", 10, 0, 100, 1, key="circuit_country_encoded"
+    circuit_country_encoded = encoded_select(
+        "País del circuito",
+        "circuit_country_encoded",
+        circuit_country_default,
+        "Lista limitada a los países de circuito presentes en entrenamiento.",
     )
-    circuitRef_encoded = num_input("circuitRef_encoded", 8, 0, 200, 1, key="circuitRef_encoded")
+    circuitRef_encoded = encoded_select(
+        "Circuito",
+        "circuitRef_encoded",
+        circuit_ref_default,
+        "Lista limitada a los circuitos presentes en entrenamiento.",
+    )
 
 # --- Clasificación (qualifying) ---
+qualifying_profiles = build_profile_options(
+    ["has_qualifying", "q1_seconds", "q2_seconds", "q3_seconds"],
+    ["has_qualifying", "q1_seconds"],
+    [False, True],
+)
 with st.sidebar.expander("Clasificación", expanded=True):
+    if not qualifying_profiles.empty:
+        qualifying_profile_index = st.sidebar.selectbox(
+            "Clasificación entrenada",
+            range(len(qualifying_profiles)),
+            format_func=lambda idx: profile_label(
+                "Clasificación",
+                qualifying_profiles.iloc[idx],
+                [
+                    ("hay", "has_qualifying"),
+                    ("Q1", "q1_seconds"),
+                    ("Q2", "q2_seconds"),
+                    ("Q3", "q3_seconds"),
+                ],
+            ),
+            key="qualifying_profile",
+        )
+        selected_qualifying = qualifying_profiles.iloc[qualifying_profile_index]
+        has_qualifying_default = int(selected_qualifying["has_qualifying"])
+        q1_default = float(selected_qualifying["q1_seconds"])
+        q2_default = float(selected_qualifying["q2_seconds"])
+        q3_default = float(selected_qualifying["q3_seconds"])
+    else:
+        has_qualifying_default = 1
+        q1_default = 88.5
+        q2_default = 87.9
+        q3_default = 87.4
+
+    has_qualifying_options = observed_values("has_qualifying", [0, 1])
+    has_qualifying = st.sidebar.selectbox(
+        "¿Hubo clasificación?",
+        has_qualifying_options,
+        index=option_index(has_qualifying_options, has_qualifying_default),
+        format_func=lambda value: "Sí" if value == 1 else "No",
+        help="Valores observados para `has_qualifying` durante entrenamiento.",
+        key="has_qualifying",
+    )
     q1_seconds = num_input(
-        "q1_seconds (tiempo Q1 en segundos)", 88.5, 50.0, 120.0, 0.1, key="q1_seconds"
+        "q1_seconds (tiempo Q1 en segundos)",
+        q1_default,
+        50.0,
+        1100.0,
+        0.1,
+        key="q1_seconds",
     )
     q2_seconds = num_input(
-        "q2_seconds (tiempo Q2 en segundos)", 87.9, 50.0, 120.0, 0.1, key="q2_seconds"
+        "q2_seconds (tiempo Q2 en segundos)",
+        q2_default,
+        50.0,
+        150.0,
+        0.1,
+        key="q2_seconds",
     )
     q3_seconds = num_input(
-        "q3_seconds (tiempo Q3 en segundos)", 87.4, 50.0, 120.0, 0.1, key="q3_seconds"
+        "q3_seconds (tiempo Q3 en segundos)",
+        q3_default,
+        50.0,
+        150.0,
+        0.1,
+        key="q3_seconds",
     )
 
 # ---------------------------------------------------------------------------
