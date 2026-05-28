@@ -30,7 +30,8 @@ st.title("🏎️ F1 Race Finish Predictor - CRISP-DM Deployment")
 st.markdown(
     "Esta aplicación carga el pipeline de ML entrenado y predice la probabilidad "
     "de que un piloto **termine** la carrera (`finished = 1`) a partir de datos "
-    "pre-carrera ya procesados ( mismas columnas que `train_balanced.csv` )."
+    "pre-carrera crudos. El pipeline aplica internamente ingeniería, selección, "
+    "balanceo de entrenamiento, escalado y modelo."
 )
 
 # ---------------------------------------------------------------------------
@@ -92,6 +93,8 @@ with st.sidebar.expander("Parrilla y carrera", expanded=True):
         index=1,
         help="1 si hay datos de clasificación, 0 si no.",
     )
+    round_num = num_input("round (ronda de la temporada)", 10, 1, 25, 1)
+    top10_start = 1 if grid <= 10 else 0
 
 # --- Datos del piloto ---
 with st.sidebar.expander("Piloto", expanded=True):
@@ -128,6 +131,9 @@ with st.sidebar.expander("Constructor (equipo)", expanded=True):
     constructor_last5_finish_rate = st.sidebar.slider(
         "constructor_last5_finish_rate", 0.0, 1.0, 0.75, 0.01
     )
+    constructor_nationality_encoded = num_input(
+        "constructor_nationality_encoded", 5, 0, 50, 1
+    )
 
 # --- Datos del circuito ---
 with st.sidebar.expander("Circuito", expanded=True):
@@ -162,9 +168,7 @@ if st.sidebar.button("🔮 Predecir", type="primary"):
         )
     else:
         # Variables derivadas (ingeniería de características)
-        experience_ratio = driver_race_count / (constructor_race_count + 1)
-        grid_above_avg = 1 if grid > constructor_prev_avg_grid else 0
-        avg_finish_rate = (driver_prev_finish_rate + constructor_prev_finish_rate) / 2
+        # No se calculan manualmente: el pipeline entrenado contiene FeatureEngineer.
 
         input_df = pd.DataFrame(
             [
@@ -183,13 +187,13 @@ if st.sidebar.button("🔮 Predecir", type="primary"):
                     "q2_seconds": q2_seconds,
                     "q3_seconds": q3_seconds,
                     "has_qualifying": has_qualifying,
+                    "top10_start": top10_start,
                     "year": year,
+                    "round": round_num,
                     "driver_nationality_encoded": driver_nationality_encoded,
+                    "constructor_nationality_encoded": constructor_nationality_encoded,
                     "circuit_country_encoded": circuit_country_encoded,
                     "circuitRef_encoded": circuitRef_encoded,
-                    "experience_ratio": experience_ratio,
-                    "grid_above_avg": grid_above_avg,
-                    "avg_finish_rate": avg_finish_rate,
                 }
             ]
         )
