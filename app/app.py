@@ -11,11 +11,39 @@ El modelo se espera en:
 
 import os
 import sys
+import importlib.util
+import types
 
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+APP_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(APP_DIR, ".."))
+if PROJECT_ROOT in sys.path:
+    sys.path.remove(PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
+
+# Ensure pickle dependencies resolve to the reusable pipeline module, not this
+# Streamlit script (`app/app.py`) when joblib imports `app.f1_pipeline`.
+PIPELINE_MODULE = "app.f1_pipeline"
+if PIPELINE_MODULE not in sys.modules:
+    package = sys.modules.get("app")
+    if package is None or not hasattr(package, "__path__"):
+        package = types.ModuleType("app")
+        package.__path__ = [APP_DIR]
+        sys.modules["app"] = package
+
+    spec = importlib.util.spec_from_file_location(
+        PIPELINE_MODULE, os.path.join(APP_DIR, "f1_pipeline.py")
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError("No se pudo cargar app.f1_pipeline para deserializar el modelo.")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[PIPELINE_MODULE] = module
+    spec.loader.exec_module(module)
 
 # ---------------------------------------------------------------------------
 # Configuración de página
@@ -38,7 +66,7 @@ st.markdown(
 # Carga del modelo
 # ---------------------------------------------------------------------------
 MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "models", "best_model_pipe.pkl"
+    APP_DIR, "..", "models", "best_model_pipe.pkl"
 )
 
 pipe = None
@@ -65,8 +93,10 @@ st.sidebar.header("📋 Parámetros de entrada")
 
 
 # Helper para inputs numéricos
-def num_input(label, value, min_value=None, max_value=None, step=None, help_text=""):
+def num_input(label, value, min_value=None, max_value=None, step=None, help_text="", key=None):
     kwargs = {"help": help_text}
+    if key is not None:
+        kwargs["key"] = key
     if min_value is not None:
         kwargs["min_value"] = min_value
     if max_value is not None:
@@ -85,20 +115,24 @@ with st.sidebar.expander("Parrilla y carrera", expanded=True):
         30,
         1,
         "Posición de salida en la parrilla (1 = pole).",
+        key="grid",
     )
-    year = num_input("year", 2024, 1950, 2030, 1)
+    year = num_input("year", 2024, 1950, 2030, 1, key="year")
     has_qualifying = st.sidebar.selectbox(
         "has_qualifying",
         [0, 1],
         index=1,
         help="1 si hay datos de clasificación, 0 si no.",
+        key="has_qualifying",
     )
-    round_num = num_input("round (ronda de la temporada)", 10, 1, 25, 1)
+    round_num = num_input("round (ronda de la temporada)", 10, 1, 25, 1, key="round")
     top10_start = 1 if grid <= 10 else 0
 
 # --- Datos del piloto ---
 with st.sidebar.expander("Piloto", expanded=True):
-    driver_race_count = num_input("driver_race_count (carreras previas)", 50, 0, 400, 1)
+    driver_race_count = num_input(
+        "driver_race_count (carreras previas)", 50, 0, 400, 1, key="driver_race_count"
+    )
     driver_prev_finish_rate = st.sidebar.slider(
         "driver_prev_finish_rate",
         0.0,
@@ -106,6 +140,7 @@ with st.sidebar.expander("Piloto", expanded=True):
         0.75,
         0.01,
         help="Tasa histórica de finalización del piloto.",
+        key="driver_prev_finish_rate",
     )
     driver_last5_finish_rate = st.sidebar.slider(
         "driver_last5_finish_rate",
@@ -114,25 +149,33 @@ with st.sidebar.expander("Piloto", expanded=True):
         0.80,
         0.01,
         help="Tasa de finalización en las últimas 5 carreras.",
+        key="driver_last5_finish_rate",
     )
-    driver_nationality_encoded = num_input("driver_nationality_encoded", 5, 0, 50, 1)
+    driver_nationality_encoded = num_input(
+        "driver_nationality_encoded", 5, 0, 50, 1, key="driver_nationality_encoded"
+    )
 
 # --- Datos del constructor ---
 with st.sidebar.expander("Constructor (equipo)", expanded=True):
     constructor_race_count = num_input(
-        "constructor_race_count (carreras previas)", 200, 0, 1000, 1
+        "constructor_race_count (carreras previas)", 200, 0, 1000, 1, key="constructor_race_count"
     )
     constructor_prev_finish_rate = st.sidebar.slider(
-        "constructor_prev_finish_rate", 0.0, 1.0, 0.70, 0.01
+        "constructor_prev_finish_rate", 0.0, 1.0, 0.70, 0.01, key="constructor_prev_finish_rate"
     )
     constructor_prev_avg_grid = num_input(
-        "constructor_prev_avg_grid (parrilla promedio histórica)", 8.0, 1.0, 30.0, 0.5
+        "constructor_prev_avg_grid (parrilla promedio histórica)",
+        8.0,
+        1.0,
+        30.0,
+        0.5,
+        key="constructor_prev_avg_grid",
     )
     constructor_last5_finish_rate = st.sidebar.slider(
-        "constructor_last5_finish_rate", 0.0, 1.0, 0.75, 0.01
+        "constructor_last5_finish_rate", 0.0, 1.0, 0.75, 0.01, key="constructor_last5_finish_rate"
     )
     constructor_nationality_encoded = num_input(
-        "constructor_nationality_encoded", 5, 0, 50, 1
+        "constructor_nationality_encoded", 5, 0, 50, 1, key="constructor_nationality_encoded"
     )
 
 # --- Datos del circuito ---
@@ -144,23 +187,37 @@ with st.sidebar.expander("Circuito", expanded=True):
         0.80,
         0.01,
         help="Tasa histórica de finalización en este circuito.",
+        key="circuit_finish_rate",
     )
     circuit_avg_grid = num_input(
-        "circuit_avg_grid (parrilla promedio histórica)", 10.0, 1.0, 30.0, 0.5
+        "circuit_avg_grid (parrilla promedio histórica)",
+        10.0,
+        1.0,
+        30.0,
+        0.5,
+        key="circuit_avg_grid",
     )
-    circuit_country_encoded = num_input("circuit_country_encoded", 10, 0, 100, 1)
-    circuitRef_encoded = num_input("circuitRef_encoded", 8, 0, 200, 1)
+    circuit_country_encoded = num_input(
+        "circuit_country_encoded", 10, 0, 100, 1, key="circuit_country_encoded"
+    )
+    circuitRef_encoded = num_input("circuitRef_encoded", 8, 0, 200, 1, key="circuitRef_encoded")
 
 # --- Clasificación (qualifying) ---
 with st.sidebar.expander("Clasificación", expanded=True):
-    q1_seconds = num_input("q1_seconds (tiempo Q1 en segundos)", 88.5, 50.0, 120.0, 0.1)
-    q2_seconds = num_input("q2_seconds (tiempo Q2 en segundos)", 87.9, 50.0, 120.0, 0.1)
-    q3_seconds = num_input("q3_seconds (tiempo Q3 en segundos)", 87.4, 50.0, 120.0, 0.1)
+    q1_seconds = num_input(
+        "q1_seconds (tiempo Q1 en segundos)", 88.5, 50.0, 120.0, 0.1, key="q1_seconds"
+    )
+    q2_seconds = num_input(
+        "q2_seconds (tiempo Q2 en segundos)", 87.9, 50.0, 120.0, 0.1, key="q2_seconds"
+    )
+    q3_seconds = num_input(
+        "q3_seconds (tiempo Q3 en segundos)", 87.4, 50.0, 120.0, 0.1, key="q3_seconds"
+    )
 
 # ---------------------------------------------------------------------------
 # Botón de predicción
 # ---------------------------------------------------------------------------
-if st.sidebar.button("🔮 Predecir", type="primary"):
+if st.sidebar.button("🔮 Predecir", type="primary", key="predict_button"):
     if not model_loaded:
         st.error(
             "No se puede predecir porque el modelo no está disponible. "
