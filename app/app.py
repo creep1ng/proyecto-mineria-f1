@@ -183,8 +183,6 @@ with st.sidebar.expander("Parrilla y carrera", expanded=True):
         "Posición de salida en la parrilla (1 = pole).",
         key="grid",
     )
-    year = num_input("year", 2024, 1950, 2030, 1, key="year")
-    round_num = num_input("round (ronda de la temporada)", 10, 1, 25, 1, key="round")
     top10_start = 1 if grid <= 10 else 0
 
 # --- Datos del piloto ---
@@ -264,7 +262,6 @@ constructor_profiles = build_profile_options(
         "constructor_prev_finish_rate",
         "constructor_prev_avg_grid",
         "constructor_last5_finish_rate",
-        "constructor_nationality_encoded",
     ],
     ["constructor_race_count", "constructor_prev_finish_rate"],
 )
@@ -279,7 +276,6 @@ with st.sidebar.expander("Constructor (equipo)", expanded=True):
                 [
                     ("carreras", "constructor_race_count"),
                     ("finish", "constructor_prev_finish_rate"),
-                    ("nac", "constructor_nationality_encoded"),
                 ],
             ),
             key="constructor_profile",
@@ -295,15 +291,11 @@ with st.sidebar.expander("Constructor (equipo)", expanded=True):
         constructor_last5_finish_default = float(
             selected_constructor["constructor_last5_finish_rate"]
         )
-        constructor_nationality_default = int(
-            selected_constructor["constructor_nationality_encoded"]
-        )
     else:
         constructor_race_default = 200
         constructor_prev_finish_default = 0.70
         constructor_prev_avg_grid_default = 8.0
         constructor_last5_finish_default = 0.75
-        constructor_nationality_default = 5
 
     constructor_race_count = num_input(
         "constructor_race_count (carreras previas)",
@@ -337,19 +329,11 @@ with st.sidebar.expander("Constructor (equipo)", expanded=True):
         0.01,
         key="constructor_last5_finish_rate",
     )
-    constructor_nationality_encoded = encoded_select(
-        "Nacionalidad del constructor",
-        "constructor_nationality_encoded",
-        constructor_nationality_default,
-        "Lista limitada a las nacionalidades de constructor presentes en entrenamiento.",
-    )
-
 # --- Datos del circuito ---
 circuit_profiles = build_profile_options(
     [
         "circuit_finish_rate",
         "circuit_avg_grid",
-        "circuit_country_encoded",
         "circuitRef_encoded",
     ],
     ["circuit_finish_rate", "circuit_avg_grid"],
@@ -364,7 +348,6 @@ with st.sidebar.expander("Circuito", expanded=True):
                 circuit_profiles.iloc[idx],
                 [
                     ("finish", "circuit_finish_rate"),
-                    ("pais", "circuit_country_encoded"),
                     ("ref", "circuitRef_encoded"),
                 ],
             ),
@@ -373,12 +356,10 @@ with st.sidebar.expander("Circuito", expanded=True):
         selected_circuit = circuit_profiles.iloc[circuit_profile_index]
         circuit_finish_default = float(selected_circuit["circuit_finish_rate"])
         circuit_avg_grid_default = float(selected_circuit["circuit_avg_grid"])
-        circuit_country_default = int(selected_circuit["circuit_country_encoded"])
         circuit_ref_default = int(selected_circuit["circuitRef_encoded"])
     else:
         circuit_finish_default = 0.80
         circuit_avg_grid_default = 10.0
-        circuit_country_default = 10
         circuit_ref_default = 8
 
     circuit_finish_rate = st.sidebar.slider(
@@ -397,12 +378,6 @@ with st.sidebar.expander("Circuito", expanded=True):
         30.0,
         0.5,
         key="circuit_avg_grid",
-    )
-    circuit_country_encoded = encoded_select(
-        "País del circuito",
-        "circuit_country_encoded",
-        circuit_country_default,
-        "Lista limitada a los países de circuito presentes en entrenamiento.",
     )
     circuitRef_encoded = encoded_select(
         "Circuito",
@@ -510,11 +485,7 @@ if st.sidebar.button("🔮 Predecir", type="primary", key="predict_button"):
                     "q3_seconds": q3_seconds,
                     "has_qualifying": has_qualifying,
                     "top10_start": top10_start,
-                    "year": year,
-                    "round": round_num,
                     "driver_nationality_encoded": driver_nationality_encoded,
-                    "constructor_nationality_encoded": constructor_nationality_encoded,
-                    "circuit_country_encoded": circuit_country_encoded,
                     "circuitRef_encoded": circuitRef_encoded,
                 }
             ]
