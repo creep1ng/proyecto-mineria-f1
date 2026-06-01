@@ -49,4 +49,9 @@ Thumbs.db
 tmp/
 *.log
 
+# Artefactos generados por notebooks y ejecuciones locales
+output/
+outputs/
+models/*.json
+
 lib/
